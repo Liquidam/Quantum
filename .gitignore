@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.pyc
+# recordings and TouchDesigner auto-saves
+OUT_*/
+Backup/
+Quantum.[0-9]*.toe
+CrashAutoSave*
+# the Qiskit libraries ship as a release download, not in git
+pylibs/
+*.zip
