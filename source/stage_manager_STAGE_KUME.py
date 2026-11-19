@@ -50,6 +50,7 @@ PAR  = '/project1/Pop_glsl_sort/ajan_par'
 LOG  = '/project1/Pop_glsl_sort/kume_log'
 EXEC = '/project1/Pop_glsl_sort/STAGE_KUME_exec'
 CTRL = '/project1/CONTROL/actions'
+MIDI = '/project1/CONTROL/midi'
 
 
 def _son_tur():
@@ -61,7 +62,10 @@ def _son_tur():
         return 0
 
 
-_D['tur'] = _son_tur()
+# Read lazily, NOT at import time: reading kume_log here made this module
+# depend on the log, so every new winner row reloaded it -> stage fell to IDLE
+# right after the draw (bug reported by Eduardo, 2026-11-17).
+_D['tur'] = -1
 
 
 # -- settings -----------------------------------------------------------------
@@ -113,24 +117,79 @@ def _yaz(ad, deger):
 
 
 # -- the quantum draw -----------------------------------------------------------
+# Circuit: q qubits, a Hadamard on each (equal superposition), then measure all.
+# The outcome is the winner. q is just enough for the agents on stage
+# (5 agents = 3 qubits, 10 = 4, 20 = 5); outcomes >= n are drawn again.
+#
+# Two engines, same circuit, same probabilities:
+#   1. Qiskit Aer, if it is installed where TouchDesigner's Python can find it
+#      (a 'pylibs' folder next to the .toe, or TD's own site-packages).
+#   2. Otherwise a state-vector simulation in NumPy (built into TouchDesigner):
+#      |0..0> -> H x q -> Born rule. Nothing has to be installed, so the file
+#      opens on any Mac without security prompts (2026-11-19: the bundled
+#      compiled Qiskit libraries were what macOS kept blocking).
+_AER = {}
+
+
+def _aer():
+    """AerSimulator class, or None. Tried once per session."""
+    if 'sim' not in _AER:
+        try:
+            import sys, os
+            kok = project.folder
+            for aday in (os.path.join(kok, 'pylibs'), os.path.join(os.path.dirname(kok), 'pylibs')):
+                if os.path.isdir(aday) and aday not in sys.path:
+                    sys.path.insert(0, aday)
+            from qiskit import QuantumCircuit
+            from qiskit_aer import AerSimulator
+            _AER['QC'], _AER['sim'] = QuantumCircuit, AerSimulator()
+        except Exception:
+            _AER['sim'] = None
+    return _AER['sim']
+
+
+def _cek_aer(n, q):
+    sim = _aer()
+    qc = _AER['QC'](q, q)
+    qc.h(range(q))
+    qc.measure(range(q), range(q))
+    for _ in range(40):
+        r = sim.run(qc, shots=1).result()
+        v = int(list(r.get_counts().keys())[0], 2)
+        if v < n:
+            return v, 'aer-%dq' % q
+    return v % n, 'aer-%dq-mod' % q
+
+
+def _cek_sv(n, q):
+    import numpy as np
+    H = np.array([[1.0, 1.0], [1.0, -1.0]]) / np.sqrt(2.0)
+    U = H
+    for _ in range(q - 1):
+        U = np.kron(U, H)                    # H on every qubit
+    psi = np.zeros(1 << q)                   # amplitudes are real for this circuit
+    psi[0] = 1.0                             # |0...0>
+    psi = U.dot(psi)
+    p = np.abs(psi) ** 2                     # Born rule
+    p = p / p.sum()
+    rng = np.random.default_rng()            # seeded from the OS entropy pool
+    for _ in range(40):
+        v = int(rng.choice(1 << q, p=p))
+        if v < n:
+            return v, 'sv-%dq' % q
+    return v % n, 'sv-%dq-mod' % q
+
+
 def _cek(n):
-    """Draw 0..n-1 with just enough qubits (5 agents = 3, 10 = 4, 20 = 5).
-    Qiskit Aer (a simulator) if present, else Python random.
-    Out-of-range results are drawn again."""
+    """Draw 0..n-1 with just enough qubits. Aer if present, else NumPy."""
     q = max(1, int(math.ceil(math.log2(max(n, 2)))))
+    if _aer() is not None:
+        try:
+            return _cek_aer(n, q)
+        except Exception as e:
+            print('[STAGE] Aer failed, NumPy state vector instead:', e)
     try:
-        from qiskit import QuantumCircuit
-        from qiskit_aer import AerSimulator
-        qc = QuantumCircuit(q, q)
-        qc.h(range(q))
-        qc.measure(range(q), range(q))
-        sim = AerSimulator()
-        for _ in range(40):
-            r = sim.run(qc, shots=1).result()
-            v = int(list(r.get_counts().keys())[0], 2)
-            if v < n:
-                return v, 'aer-%dq' % q
-        return v % n, 'aer-%dq-mod' % q
+        return _cek_sv(n, q)
     except Exception:
         return random.randrange(n), 'python'
 
@@ -161,6 +220,8 @@ def _faz_suresi(f):
 
 
 def _yeni_tur():
+    if _D['tur'] < 0:
+        _D['tur'] = _son_tur()
     _D['tur'] += 1
     _sure_cek()
     _n_cek()
@@ -238,6 +299,10 @@ def adim():
             _D['kazanan'], _D['kaynak'] = k, kaynak
             _yaz('winner', k)
             _logla()
+            try:                    # MIDI OUT: the agent's number 1..20 (CONTROL panel)
+                op(MIDI).module.send_winner(k)
+            except Exception as e:
+                print('[STAGE] MIDI OUT failed:', e)
             _git('COKUS')
 
     elif f == 'COKUS':

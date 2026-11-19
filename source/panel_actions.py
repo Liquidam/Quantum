@@ -118,6 +118,12 @@ def mouse(event, pv, prev):
         if n == 'btn_forget':
             md.forget()
             return
+        if n == 'out_device':               # MIDI OUT: the winner's number
+            md.next_out_device()
+            return
+        if n in ('out_cc', 'out_ch'):       # right half +1, left half -1
+            md.nudge_out(n, 1 if o.panel.u.val >= 0.5 else -1)
+            return
         if md.learning():                   # LEARN: a click selects, never triggers
             target = o.parent().name if n == 'dial' else n
             if target in md.BUTTONS + md.KNOBS + md.BARS:
@@ -150,6 +156,9 @@ def mouse(event, pv, prev):
         return
     if event != 'change':
         return
+    if n in ('out_cc', 'out_ch') and pv.name == 'wheel' and pv.val != 0:
+        md.nudge_out(n, 1 if pv.val > 0 else -1)
+        return
     if n == 'dial':
         k = o.parent()
         if pv.name == 'v' and k.path in _DRAG:
@@ -171,6 +180,7 @@ def tick(frame):
     if not _BOOT and parent().op('midi') is not None:
         _BOOT['done'] = True
         _midi().auto_device()
+        _midi().auto_out_device()
     if _R:
         u = (time.time() - _R['t0']) / RAMP_S
         f = _R['from'] + (1.0 - _R['from']) * min(1.0, u)
@@ -201,7 +211,7 @@ def _show():
     _w('st_progress').par.Value = frac
     _w('st_line').par.text = line
     k = s['kazanan']
-    _w('st_winner').par.text = ('WINNER    AGENT  %d' % k) if k >= 0 else _last_winner()
+    _w('st_winner').par.text = ('WINNER    AGENT  %d' % (k + 1)) if k >= 0 else _last_winner()
     rows = _winners_rows()
     for i in range(8):
         _w('win%d' % i).par.text = rows[i] if i < len(rows) else ''
@@ -212,7 +222,7 @@ def _show():
 def _last_winner():
     t = op(LOG)
     if t.numRows > 1:
-        return 'last winner    AGENT  %s' % t[t.numRows - 1, 'kazanan'].val
+        return 'last winner    AGENT  %d' % (int(t[t.numRows - 1, 'kazanan'].val) + 1)
     return '-'
 
 
@@ -220,9 +230,10 @@ def _winners_rows(n=8):
     t = op(LOG)
     rows = []
     for r in range(max(1, t.numRows - n), t.numRows)[::-1]:
-        rows.append('round %-4s %s   %2s agents  %5.1f s    AGENT %s' % (
+        # agents are shown 1..20 (the number MIDI OUT sends); the log keeps slots 0..19
+        rows.append('round %-4s %s   %2s agents  %5.1f s    AGENT %d' % (
             t[r, 'tur'].val, t[r, 'saat'].val, t[r, 'ajan_sayisi'].val,
-            float(t[r, 'sure_sn'].val), t[r, 'kazanan'].val))
+            float(t[r, 'sure_sn'].val), int(t[r, 'kazanan'].val) + 1))
     return rows or ['no rounds yet']
 
 

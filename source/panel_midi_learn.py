@@ -20,6 +20,14 @@
 #
 # Bindings live in the table `midi_map` (saved with the .toe).
 # Messages arrive through `midi_in` (MIDI In DAT, device ID 1 in /local/midi/device).
+#
+# MIDI OUT - the winner's number (requested by Eduardo, 2026-11-17)
+#   Every time the qubits draw a winner, the agent's number 1..20 is sent as a
+#   Control Change to the chosen output (e.g. the macOS IAC Driver -> Max/MSP).
+#   OUT       click to choose the output device (or OFF)
+#   CC  CH    click the right half for +1, the left half for -1 (or mouse wheel)
+#   Sent by `midi_out` (MIDI Out CHOP, device ID 2 in /local/midi/device).
+#   CC number and channel are the CONTROL parameters Outcc / Outch.
 # =============================================================================
 
 MAP = 'midi_map'
@@ -243,3 +251,108 @@ def show():
             t.par.text = '> MIDI ?'
         else:
             t.par.text = binding_text(c) or ('-' if _S['learn'] else '')
+    if C.op('out_device') is not None:
+        show_out()
+
+
+# -- MIDI OUT: the winner's number ------------------------------------------------------------
+OUT_ID = '2'
+OUTPUTS = '/local/midi/midi_outputs'
+_OUT = {'last': ''}
+
+
+def outputs():
+    t = op(OUTPUTS)
+    return [t[r, 0].val for r in range(t.numRows) if t[r, 0].val.strip()] if t else []
+
+
+def out_device():
+    t = op(DEVICES)
+    for r in range(1, t.numRows):
+        if t[r, 'id'].val == OUT_ID:
+            return t[r, 'outdevice'].val
+    return ''
+
+
+def set_out_device(name):
+    t = op(DEVICES)
+    if t.numRows == 0:
+        t.appendRow(['id', 'indevice', 'outdevice', 'definition', 'channel'])
+    for r in range(t.numRows - 1, 0, -1):
+        if t[r, 'id'].val == OUT_ID:
+            t.deleteRow(r)
+    if name:
+        t.appendRow([OUT_ID, '', name, '', '1'])
+    m = _C().op('midi_out')            # re-open the port
+    if m is not None:
+        m.par.active = False
+        run("op('%s').par.active = True" % m.path, delayFrames=2)
+
+
+def next_out_device():
+    """Click on OUT: OFF -> first output -> next ... -> OFF."""
+    outs = outputs()
+    if not outs:
+        _S['msg'] = 'no MIDI output found - on a Mac switch on the IAC Driver, then restart TouchDesigner'
+        return
+    cycle = [''] + outs
+    cur = out_device()
+    i = cycle.index(cur) + 1 if cur in cycle else 1
+    set_out_device(cycle[i % len(cycle)])
+    _S['msg'] = ('MIDI OUT: %s' % out_device()) if out_device() else 'MIDI OUT: off'
+
+
+def auto_out_device():
+    """At start: a remembered output that is not present is cleared (no guessing)."""
+    if out_device() and out_device() not in outputs():
+        set_out_device('')
+
+
+def out_cc():
+    return int(_C().par.Outcc.eval())
+
+
+def out_ch():
+    return int(_C().par.Outch.eval())
+
+
+def nudge_out(which, d):
+    C = _C()
+    if which == 'out_cc':
+        C.par.Outcc = max(0, min(127, out_cc() + d))
+    elif which == 'out_ch':
+        C.par.Outch = max(1, min(16, out_ch() + d))
+
+
+def send_winner(k):
+    """Called by the stage manager when the qubits have drawn agent k (0-based).
+    Sends k + 1 (agents are numbered 1..20) as CC Outcc on channel Outch."""
+    n = int(k) + 1
+    dev = out_device()
+    if not dev or dev not in outputs():
+        _OUT['last'] = 'AGENT %d  (not sent: no MIDI OUT device)' % n
+        return False
+    m = _C().op('midi_out')
+    # TD counts controllers from 1 (CC 0 is index 1) and takes the value as 0..1
+    # (x 127 on the wire), so n / 127 arrives as exactly n.
+    m.sendControl(out_ch(), out_cc() + 1, n / 127.0)
+    _OUT['last'] = 'AGENT %d  sent as CC %d = %d' % (n, out_cc(), n)
+    print('[MIDI OUT] %s  ch %d  ->  %s' % (_OUT['last'], out_ch(), dev))
+    return True
+
+
+def show_out():
+    C = _C()
+    dev = out_device()
+    if dev and dev in outputs():
+        C.op('out_device').par.text = 'OUT   %s' % dev
+    elif outputs():
+        C.op('out_device').par.text = 'OUT   off  -  click to choose'
+    else:
+        C.op('out_device').par.text = 'OUT   no MIDI output found'
+    C.op('out_cc').par.text = '-      CC %d      +' % out_cc()
+    C.op('out_ch').par.text = '-      CH %d      +' % out_ch()
+    line = 'at every answer the winning agent 1-20 is sent as CC %d, channel %d' % (out_cc(), out_ch())
+    if _OUT['last']:
+        line = 'last:  %s' % _OUT['last']
+    C.op('out_status').par.text = line

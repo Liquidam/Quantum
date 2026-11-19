@@ -3,8 +3,8 @@
 **Sada AlQuantum · AGENTS** — a real-time TouchDesigner piece by Göktuğ Kahyaoğlu.
 
 Up to twenty agents share one field of half a million particles. In every round they
-listen, fall into superposition and collapse, and a quantum draw (Qiskit Aer) decides
-which agent answers. The texture of every agent is the interference pattern of an
+listen, fall into superposition and collapse, and a quantum draw (a measurement of
+qubits in equal superposition) decides which agent answers. The texture of every agent is the interference pattern of an
 n-qubit state.
 
 <p align="center"><img src="docs/final_image.jpg" width="360" alt="The final image: coloured agents of particle texture on black"></p>
@@ -14,25 +14,22 @@ n-qubit state.
 ## 1. Download
 
 **[Download Quantum-macOS.zip](https://github.com/Liquidam/Quantum/releases/latest/download/Quantum-macOS.zip)**
-(about 32 MB, from the [Releases](https://github.com/Liquidam/Quantum/releases) page).
+(from the [Releases](https://github.com/Liquidam/Quantum/releases) page).
 
-Unzip it. You get one folder with two things in it:
-
-| | |
-|---|---|
-| `Quantum.toe` | the piece |
-| `pylibs/` | the Qiskit quantum simulator (Apple Silicon Macs). **Keep it next to `Quantum.toe`.** |
+Unzip it. You get one folder with `Quantum.toe` in it. Nothing else to install, and
+macOS asks for no security permissions: the quantum simulation runs on NumPy, which is
+built into TouchDesigner.
 
 You also need **TouchDesigner 2025.32820 or newer** (the free licence is fine) from
 [derivative.ca](https://derivative.ca/download).
 
-> Without `pylibs` everything still works. The winner of each round is then drawn by
-> Python's random generator instead of the quantum simulator. The field itself is
-> identical.
+> If Qiskit and Qiskit Aer are installed where TouchDesigner's Python can find them, the
+> draw uses Qiskit Aer instead (the log then says `aer-3q` rather than `sv-3q`). The
+> circuit and the probabilities are the same.
 
 ## 2. Before you open it
 
-1. **Plug in your MIDI controller** (if you use one). TouchDesigner looks for MIDI devices only when it starts.
+1. **Plug in your MIDI controller** (if you use one), and switch on the **IAC Driver** if you want to send the winner to Max/MSP (section 7). TouchDesigner looks for MIDI devices only when it starts.
 2. **Connect the projector / second screen** (if you show the piece).
 
 ## 3. Open it
@@ -65,7 +62,7 @@ On the HOW TO window's **THE PANEL** tab, gold numbers appear on the real panel.
 5. **TIME mode** — `1 RANDOM RANGE`: each round gets a random length between *shortest* and *longest*. `2 FIXED TIME`: each round lasts exactly *fixed*.
 6. **Time knobs** (seconds) — shortest / longest for mode 1, fixed for mode 2.
 7. **WINNERS** — the last 8 rounds, newest on top.
-8. **MIDI** — map any controller (section 7).
+8. **MIDI** — map any controller, and send the winner's number out (section 7).
 
 Knobs: click and drag up or down, or use the mouse wheel.
 
@@ -118,6 +115,19 @@ Any controller works: pads, buttons, knobs, faders. On the panel's **MIDI** card
 
 To remove a mapping: LEARN, click the panel control, then FORGET.
 
+### MIDI OUT: the winner's number
+
+At every answer the winning agent's number (**1–20**, as shown on the panel) is sent as a
+Control Change, at the moment the qubits are measured. On the **MIDI OUT** row of the MIDI card:
+
+1. **OUT** — click to choose the output device (click again to cycle; one position is *off*).
+2. **CC** and **CH** — the controller number and the channel. Click the right half for +1,
+   the left half for −1, or use the mouse wheel. Default: CC 20, channel 1.
+
+To receive it in Max/MSP on the same Mac: open **Audio MIDI Setup > Window > Show MIDI Studio**,
+double-click **IAC Driver**, tick **Device is online**, then open `Quantum.toe` and choose
+`IAC Driver Bus 1` as OUT. In Max, `[ctlin 20 1]` outputs the agent number.
+
 ## 8. Troubleshooting
 
 | | |
@@ -127,7 +137,7 @@ To remove a mapping: LEARN, click the panel control, then FORGET.
 | MIDI device not listed | save, close TouchDesigner, plug it in, open the file again, click DEVICE |
 | MIDI does nothing | DEVICE must show its name and LEARN must be off; the status line shows "last in: …" for every message |
 | Black or faint after RESET | normal, the image builds up again by itself |
-| Winners say "python" | `pylibs` is not next to `Quantum.toe` |
+| No MIDI OUT device | switch on the IAC Driver (section 7), close TouchDesigner, open the file again, click OUT |
 | Yellow warning about 1280 pixels | the free licence limits the image size; expected |
 
 ---
@@ -139,11 +149,11 @@ The main network is laid out in labelled bands; open any box to see numbered sig
 ```
 /project1
   GUIDE           the HOW TO window
-  CONTROL         the panel (logic: CONTROL/actions, MIDI: CONTROL/midi + midi_map)
+  CONTROL         the panel (logic: CONTROL/actions, MIDI: CONTROL/midi + midi_map, MIDI OUT: midi_out)
   Pop_glsl_sort   the piece
      1 STAGE          round manager (STAGE_KUME), the dials it writes (ajan_par), the draw log
      2 AGENT CENTRES  twenty soft discs on the CPU: contact, attraction, wander, collapse
-     3 QUANTUM FIELD  the n-qubit state (Qiskit, or the same gates in NumPy)
+     3 QUANTUM FIELD  the n-qubit state (NumPy gates; Qiskit if installed, same result)
      4 PARTICLES      524,288 particles on the GPU, shader SADA FIELD (SPH + agent basins + field)
      5 RENDER
      6 CURTAIN        the feedback loop that builds the look (one colour only)

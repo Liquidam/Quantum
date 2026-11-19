@@ -249,6 +249,7 @@ _QK = {'hazir': False}
 def _qiskit_yukle():
     global PYLIBS
     if _QK['hazir']: return True
+    if _QK.get('yok'): return False      # tried once already: NumPy from now on
     import sys, os
     for aday in _pylib_adaylari():
         if os.path.isdir(aday) and aday not in sys.path:
@@ -263,7 +264,8 @@ def _qiskit_yukle():
         _QK['hazir'] = True
         return True
     except Exception as e:
-        print('[qsim] Qiskit yuklenemedi, numpy yoluna dusuluyor:', e)
+        _QK['yok'] = True
+        print('[qsim] Qiskit not found - the NumPy gate set (identical result) draws the field:', e)
         return False
 
 
