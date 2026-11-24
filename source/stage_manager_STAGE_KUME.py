@@ -1,31 +1,47 @@
 # =============================================================================
 # SADA ALQUANTUM - STAGE MANAGER (one round of the piece)
-# first built 2026-10-26, rewritten 2026-11-11 for the CONTROL panel
+# first built 2026-10-26, rewritten 2026-11-11 for the CONTROL panel,
+# 2026-11-24: MANUAL mode - every stage has its own button (Eduardo performs
+# the stages by hand, in sync with the music, from a MIDI controller).
 #
 #   IDLE -> 1 LISTENING -> 2 SUPERPOSITION -> 3 COLLAPSE -> 4 ANSWER -> 5 RETURN
-#                ^                                                      |
-#                +------------------ next round -------------------------+
+#
+# Two run modes (CONTROL.par.Runmode):
+#   1 AUTO    the round runs by itself on the TIME settings and loops.
+#   2 MANUAL  each stage plays its movement and then HOLDS until the next
+#             stage button is pressed. After RETURN the stage waits (IDLE).
+# The stage buttons work in both modes: pressing one jumps to that stage
+# (in AUTO the timing then carries on from there).
+#
+# Every stage starts from wherever the dials are at that moment, so pressing
+# the buttons early, late or out of order never makes the image jump.
+#
+# The draw (the qubits choose the winner) happens:
+#   AUTO    at the end of SUPERPOSITION (as before)
+#   MANUAL  the moment COLLAPSE (or ANSWER) is pressed - if not drawn yet.
 #
 # Writes ONLY these channels of ajan_par (the stage's dials):
 #   tension    listening: lean to the middle, breaths fall into sync
 #   chaos      superposition: radius flicker and random kicks
 #   winner     the agent drawn by the qubits, -1 = none
 #   collapse   0..1 the winner inflates, the others flow into it
-#   n_active   how many agents are on stage this round (2..20)
+#   n_active   how many agents are on stage (2..20)
 # 'form' (A territory -> B body) is NOT touched here: the CONTROL panel owns it.
 #
 # Settings come from the CONTROL panel (/project1/CONTROL/actions.settings()):
-#   agents     how many agents (set by hand)
-#   time mode  1 = RANDOM RANGE: every round draws a length between
-#                  shortest and longest
-#              2 = FIXED: every round lasts exactly the given time
+#   agents     how many agents (set by hand). Applied while IDLE or LISTENING,
+#              and at RETURN (so: change it during ANSWER, it lands at RETURN).
+#   auto       True = AUTO, False = MANUAL
+#   time mode  1 = RANDOM RANGE (a length between shortest and longest)
+#              2 = FIXED
 #   "time" = from the start of LISTENING to the end of COLLAPSE. The three
 #   phases keep their proportions (15 : 2.5 : 3.5). ANSWER and RETURN are fixed.
+#   In MANUAL the same lengths set how fast each movement plays.
 #
 # Real elapsed time, never frame counts. Public calls:
-#   basla()   start            yeniden()  restart the listening window
-#   bitir()   stop, everyone home
-#   durum()   raw state        bilgi()    what the panel shows
+#   basla()   start a round (LISTENING)   git(stage)  jump to a stage
+#   bitir()   stop, everyone home         yeniden()   restart listening
+#   durum()   raw state                   bilgi()     what the panel shows
 # Editing this text reloads the module: a running round stops (state -> IDLE).
 # =============================================================================
 import time
@@ -36,15 +52,17 @@ AJAN_SAYISI = 20      # slots. The agents on stage are the first N of them.
 DINLEME_SN  = 15.0    # LISTENING      base length
 SUPER_SN    = 2.5     # SUPERPOSITION  base length, short and chaotic
 COKUS_SN    = 3.5     # COLLAPSE       base length, one comes forward
-CEVAP_SN    = 8.0     # ANSWER         fixed (in performance may wait for a key)
+CEVAP_SN    = 8.0     # ANSWER         fixed (AUTO only; MANUAL holds)
 DONUS_SN    = 5.0     # RETURN         fixed, everyone home - same particles
 _TABAN      = DINLEME_SN + SUPER_SN + COKUS_SN    # 21 s = scale 1.0
 
 FAZ_ADI = {'BEKLE': 'IDLE', 'DINLEME': '1  LISTENING', 'SUPER': '2  SUPERPOSITION',
            'COKUS': '3  COLLAPSE', 'CEVAP': '4  ANSWER', 'DONUS': '5  RETURN'}
+SIRA = ('DINLEME', 'SUPER', 'COKUS', 'CEVAP', 'DONUS')
 
 _D = {'faz': 'BEKLE', 't0': 0.0, 'kazanan': -1, 'kaynak': '-', 'tur': 0,
-      'n': AJAN_SAYISI, 'sure': _TABAN, 'olcek': 1.0}
+      'n': AJAN_SAYISI, 'sure': _TABAN, 'olcek': 1.0,
+      'v0': {}, 'v': {'tension': 0.0, 'chaos': 0.0, 'collapse': 0.0}}
 
 PAR  = '/project1/Pop_glsl_sort/ajan_par'
 LOG  = '/project1/Pop_glsl_sort/kume_log'
@@ -72,9 +90,15 @@ _D['tur'] = -1
 def _ayar():
     """The CONTROL panel's settings; safe defaults if the panel is missing."""
     try:
-        return op(CTRL).module.settings()
+        a = op(CTRL).module.settings()
     except Exception:
-        return dict(agents=AJAN_SAYISI, mode=1, tmin=12.0, tmax=35.0, tfix=21.0)
+        a = dict(agents=AJAN_SAYISI, mode=1, tmin=12.0, tmax=35.0, tfix=21.0)
+    a.setdefault('auto', True)
+    return a
+
+
+def _oto():
+    return bool(_ayar()['auto'])
 
 
 def _sure_cek():
@@ -91,11 +115,23 @@ def _sure_cek():
 
 
 def _n_cek():
-    """How many agents this round (set by hand on the panel)."""
+    """How many agents (set by hand on the panel)."""
     N = int(_ayar()['agents'])
     N = max(2, min(AJAN_SAYISI, N))
     _D['n'] = N
     _yaz('n_active', N)
+
+
+def n_degisti():
+    """The AGENTS knob moved. Lands now while IDLE, LISTENING or RETURN
+    (unless that would take the winner off stage); otherwise at RETURN."""
+    f = _D['faz']
+    if f in ('BEKLE', 'DINLEME'):
+        _n_cek()
+    elif f == 'DONUS':
+        k = _D['kazanan']
+        if k < 0 or k < int(_ayar()['agents']):
+            _n_cek()
 
 
 def _o():
@@ -104,6 +140,8 @@ def _o():
 
 # -- ajan_par -----------------------------------------------------------------
 def _yaz(ad, deger):
+    if ad in _D['v']:
+        _D['v'][ad] = float(deger)
     p = op(PAR)
     for i in range(16):
         nm = 'name%d' % i
@@ -114,6 +152,13 @@ def _yaz(ad, deger):
             p.par['value%d' % i] = float(deger)
             return True
     return False
+
+
+def _oku(ad):
+    try:
+        return float(op(PAR)[ad].eval())
+    except Exception:
+        return _D['v'].get(ad, 0.0)
 
 
 # -- the quantum draw -----------------------------------------------------------
@@ -203,64 +248,152 @@ def _logla():
         _D['tur'], _D['kazanan'], _D['kaynak'], _D['n'], _D['sure']))
 
 
+def _cekilis():
+    """The qubits choose the winner: log it, send it out (MIDI OUT), show it."""
+    k, kaynak = _cek(_D['n'])
+    _D['kazanan'], _D['kaynak'] = k, kaynak
+    _yaz('winner', k)
+    _logla()
+    try:                    # MIDI OUT: the agent's number 1..20 (CONTROL panel)
+        op(MIDI).module.send_winner(k)
+    except Exception as e:
+        print('[STAGE] MIDI OUT failed:', e)
+
+
 # -- phases ---------------------------------------------------------------------
 def _yumusak(x):
     x = max(0.0, min(1.0, x))
     return x * x * (3.0 - 2.0 * x)
 
 
+def _mix(a, b, t):
+    return a + (b - a) * t
+
+
 def _git(faz):
+    """Enter a stage. Remember where the dials are: the stage moves on from there."""
     _D['faz'] = faz
     _D['t0'] = time.time()
+    _D['v0'] = {k: _oku(k) for k in ('tension', 'chaos', 'collapse')}
+    if faz != 'BEKLE':
+        op(EXEC).par.active = True
 
 
 def _faz_suresi(f):
-    return {'DINLEME': DINLEME_SN * _o(), 'SUPER': SUPER_SN * _o(),
-            'COKUS': COKUS_SN * _o(), 'CEVAP': CEVAP_SN, 'DONUS': DONUS_SN}.get(f, 0.0)
+    L = {'DINLEME': DINLEME_SN * _o(), 'SUPER': SUPER_SN * _o(),
+         'COKUS': COKUS_SN * _o(), 'CEVAP': CEVAP_SN, 'DONUS': DONUS_SN}.get(f, 0.0)
+    if f == 'CEVAP':        # ANSWER pressed before the collapse finished
+        L = max(L, _cevap_yukselis()) if _oto() else _cevap_yukselis()
+    return L
+
+
+def _cevap_yukselis():
+    """How long ANSWER takes to finish an unfinished collapse."""
+    c0 = _D['v0'].get('collapse', 1.0) if _D['faz'] == 'CEVAP' else 1.0
+    return 0.6 if c0 > 0.9 else COKUS_SN * _o()
 
 
 def _yeni_tur():
+    """A new round: number, length, agent count. The winner is cleared."""
     if _D['tur'] < 0:
         _D['tur'] = _son_tur()
     _D['tur'] += 1
+    _D['kazanan'] = -1
+    _D['kaynak'] = '-'
+    _yaz('winner', -1)
     _sure_cek()
     _n_cek()
-    _git('DINLEME')
 
 
 # -- public ---------------------------------------------------------------------
+_ENG = {'LISTENING': 'DINLEME', 'LISTEN': 'DINLEME', 'START': 'DINLEME',
+        'SUPERPOSITION': 'SUPER', 'COLLAPSE': 'COKUS', 'ANSWER': 'CEVAP',
+        'RETURN': 'DONUS'}
+
+
 def basla():
-    _yaz('tension', 0.0); _yaz('chaos', 0.0)
-    _yaz('winner', -1);   _yaz('collapse', 0.0)
-    _D['kazanan'] = -1
+    """Start a round: LISTENING. Only called when no winner is on stage."""
     _D.pop('bitir', None)
+    _D.pop('sonra', None)
     _yeni_tur()
-    op(EXEC).par.active = True
+    _git('DINLEME')
+
+
+def git(faz):
+    """A stage button. Jumps to that stage from wherever the round is.
+    A new round (LISTENING / SUPERPOSITION) while a winner is on stage first
+    sends everyone home (RETURN) and then starts it."""
+    f = _ENG.get(str(faz).upper(), faz)
+    if f not in SIRA:
+        return
+    cur = _D['faz']
+    _D.pop('bitir', None)
+    winner_on = _D['kazanan'] >= 0 and cur in ('COKUS', 'CEVAP', 'DONUS')
+
+    if f in ('DINLEME', 'SUPER'):
+        if winner_on:
+            _D['sonra'] = f                 # after RETURN
+            if cur != 'DONUS':
+                _donus()
+            return
+        if f == 'DINLEME':
+            basla()
+            return
+        if cur == 'BEKLE':
+            _yeni_tur()
+        _D.pop('sonra', None)
+        _git('SUPER')
+        return
+
+    if f in ('COKUS', 'CEVAP'):
+        _D.pop('sonra', None)
+        if cur == 'BEKLE':
+            _yeni_tur()
+        if _D['kazanan'] < 0:
+            _cekilis()
+        _git(f)
+        return
+
+    if f == 'DONUS':
+        _D.pop('sonra', None)
+        if cur != 'BEKLE':
+            _donus()
+
+
+def _donus():
+    _git('DONUS')
+    # a new agent count lands now, unless it would take the winner off stage
+    k = _D['kazanan']
+    if k < 0 or k < int(_ayar()['agents']):
+        _n_cek()
 
 
 def yeniden():
     """The brief's 'restart the listening window'."""
-    if _D['faz'] in ('COKUS', 'CEVAP'):
-        _git('DONUS')
-    else:
-        basla()
+    git('DINLEME')
 
 
 def bitir():
     """Stop. Whatever is happening relaxes home, then the stage idles."""
+    _D.pop('sonra', None)
     if _D['faz'] in ('COKUS', 'CEVAP'):
         _D['bitir'] = True
-        _git('DONUS')
+        _donus()
     elif _D['faz'] == 'DONUS':
         _D['bitir'] = True          # already going home: just do not start again
     else:
         _yaz('tension', 0.0); _yaz('chaos', 0.0)
         _yaz('winner', -1);   _yaz('collapse', 0.0)
+        _D['kazanan'] = -1
         _git('BEKLE')
 
 
 def durum():
     return dict(_D, gecen=round(time.time() - _D['t0'], 2))
+
+
+SONRAKI = {'BEKLE': '1  LISTENING', 'DINLEME': '2  SUPERPOSITION', 'SUPER': '3  COLLAPSE',
+           'COKUS': '4  ANSWER', 'CEVAP': '5  RETURN', 'DONUS': '1  LISTENING'}
 
 
 def bilgi():
@@ -269,60 +402,84 @@ def bilgi():
     L = _faz_suresi(f)
     g = time.time() - _D['t0']
     frac = min(1.0, g / L) if L > 0 else 0.0
+    oto = _oto()
     return dict(faz=f, ad=FAZ_ADI.get(f, f), frac=frac,
                 kalan=max(0.0, L - g) if L > 0 else 0.0,
                 tur=_D['tur'], n=_D['n'], sure=_D['sure'],
                 kazanan=_D['kazanan'], kaynak=_D['kaynak'],
-                durduruluyor=bool(_D.get('bitir')))
+                durduruluyor=bool(_D.get('bitir')),
+                oto=oto, tutuyor=(not oto and f not in ('BEKLE', 'DONUS') and g >= L),
+                sonraki=SONRAKI.get(f, ''), sonra=FAZ_ADI.get(_D.get('sonra', ''), ''))
 
 
 def adim():
-    """Called every frame by STAGE_KUME_exec while not IDLE."""
+    """Called every frame by STAGE_KUME_exec while not IDLE.
+    Every stage moves the dials from where they were (v0) to its own target."""
     f = _D['faz']
     if f == 'BEKLE':
         return
     g = time.time() - _D['t0']
     L = _faz_suresi(f)
+    v0 = _D['v0']
+    oto = _oto()
 
     if f == 'DINLEME':
         # the whole window IS the leaning-in
-        _yaz('tension', _yumusak(g / L))
-        if g >= L:
+        u = _yumusak(g / L)
+        _yaz('tension', _mix(v0['tension'], 1.0, u))
+        _yaz('chaos', _mix(v0['chaos'], 0.0, _yumusak(g / 1.5)))
+        _yaz('collapse', _mix(v0['collapse'], 0.0, u))
+        if oto and g >= L:
             _git('SUPER')
 
     elif f == 'SUPER':
-        _yaz('tension', 1.0)
-        _yaz('chaos', math.sin(math.pi * min(1.0, g / L)))
-        if g >= L:
-            _yaz('chaos', 0.0)
-            k, kaynak = _cek(_D['n'])
-            _D['kazanan'], _D['kaynak'] = k, kaynak
-            _yaz('winner', k)
-            _logla()
-            try:                    # MIDI OUT: the agent's number 1..20 (CONTROL panel)
-                op(MIDI).module.send_winner(k)
-            except Exception as e:
-                print('[STAGE] MIDI OUT failed:', e)
-            _git('COKUS')
+        _yaz('tension', _mix(v0['tension'], 1.0, _yumusak(g / max(0.3, 0.3 * L))))
+        _yaz('collapse', _mix(v0['collapse'], 0.0, _yumusak(g / 1.0)))
+        if oto:
+            # one swell of chaos, then the draw
+            _yaz('chaos', _mix(v0['chaos'], 0.0, _yumusak(g / L)) +
+                 math.sin(math.pi * min(1.0, g / L)))
+            if g >= L:
+                _yaz('chaos', 0.0)
+                if _D['kazanan'] < 0:
+                    _cekilis()
+                _git('COKUS')
+        else:
+            # MANUAL: the chaos rises and stays until COLLAPSE is pressed
+            _yaz('chaos', _mix(v0['chaos'], 0.7, _yumusak(g / max(0.5, 0.4 * L))))
 
     elif f == 'COKUS':
         u = _yumusak(g / L)
-        _yaz('collapse', u)
-        _yaz('tension', 1.0 - u)
-        if g >= L:
+        _yaz('collapse', _mix(v0['collapse'], 1.0, u))
+        _yaz('tension', _mix(v0['tension'], 0.0, u))
+        _yaz('chaos', _mix(v0['chaos'], 0.0, _yumusak(g / max(0.3, 0.3 * L))))
+        if oto and g >= L:
             _git('CEVAP')
 
     elif f == 'CEVAP':
-        _yaz('collapse', 1.0)
-        if g >= L:
-            _git('DONUS')
+        u = _yumusak(g / _cevap_yukselis())
+        _yaz('collapse', _mix(v0['collapse'], 1.0, u))
+        _yaz('tension', _mix(v0['tension'], 0.0, u))
+        _yaz('chaos', _mix(v0['chaos'], 0.0, u))
+        if oto and g >= L:
+            _donus()
 
     elif f == 'DONUS':
-        _yaz('collapse', 1.0 - _yumusak(g / L))
+        u = _yumusak(g / L)
+        _yaz('collapse', _mix(v0['collapse'], 0.0, u))
+        _yaz('tension', _mix(v0['tension'], 0.0, u))
+        _yaz('chaos', _mix(v0['chaos'], 0.0, u))
         if g >= L:
             _yaz('winner', -1)
             _yaz('collapse', 0.0)
+            _D['kazanan'] = -1
+            _n_cek()
+            sonra = _D.pop('sonra', None)
             if _D.pop('bitir', False):
                 _git('BEKLE')
+            elif sonra:
+                git(sonra)
+            elif oto:
+                basla()
             else:
-                _yeni_tur()
+                _git('BEKLE')       # MANUAL: wait for LISTENING

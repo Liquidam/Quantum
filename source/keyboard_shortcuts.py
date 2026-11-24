@@ -8,8 +8,8 @@
 #              right again - never during a show.
 #   Ctrl + 7   still image   -> OUT_<project>/<project>.N.jpg   (moviefileout2)
 #   Ctrl + 8   video on/off  -> OUT_<project>/V_<project>.N.mov (moviefileout1)
-#   Ctrl + 9   open the output window  (perform, 1080 x 1350) on the SECOND screen;
-#              with only one screen it opens on that one
+#   Ctrl + 9   open the output window (no border) on the screen and in the size
+#              chosen on the CONTROL panel, OUTPUT card (cntrl/output)
 #   Ctrl + 0   close the output window
 #
 # Recording state lives in `signals` (video = 1 while recording, shot = one
@@ -36,26 +36,14 @@ def guide_open():
     op('guide_window').par.winopen.pulse()
 
 def preview_open():
-    # 4:5 like the final image, as tall as this screen allows (max 800)
-    m = monitors[0] if len(monitors) else None
-    h = 800 if m is None else int(max(400, min(800, m.height - 140)))
-    w = op('preview_window')
-    w.par.winw, w.par.winh = int(h * 0.8), h
-    w.par.winoffsetx, w.par.winoffsety = -20, -40
-    w.par.winopen.pulse()
+    # the picture's shape; pressed again: NORMAL <-> LARGE (cntrl/output)
+    op('output').module.preview_toggle()
 
 def window_open():
-    w = op('perform')
-    if len(monitors) > 1:              # projector / second screen: as set up
-        w.par.display = 1
-        w.par.winoffsetx = 514
-    else:                              # one screen only
-        w.par.display = 0
-        w.par.winoffsetx = 0
-    w.par.winopen.pulse()
+    op('output').module.open_window()
 
 def window_close():
-    op('perform').par.winclose.pulse()
+    op('output').module.close_window()
 
 ACTIONS = {'1': panel_open, '2': guide_open, '3': preview_open, '`': rebirth, '7': still, '8': video_toggle, '9': window_open, '0': window_close}
 

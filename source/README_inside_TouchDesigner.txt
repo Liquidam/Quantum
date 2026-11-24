@@ -13,12 +13,18 @@ RUN IT
    or the GUIDE button) and the FINAL IMAGE preview (Ctrl+3).
 1. The CONTROL panel opens by itself when the file opens. Closed it? Ctrl+1.
    (Or right-click CONTROL > View.)
-2. START   from A (territory) the board first becomes bodies (10 s),
-           then rounds loop on their own.
+2. MANUAL (default) or AUTO - the radio on the SHOW card.
+   MANUAL: 1 START, 2 SUPERPOSITION, 3 COLLAPSE, 4 ANSWER, 5 RETURN, each by hand;
+           every stage plays its movement, then holds until the next press.
+   AUTO:   1 START and the rounds loop on their own on the TIME settings.
+   From A (territory) START first turns the board into bodies (10 s).
 3. STOP    whatever is happening relaxes, everyone goes home, the stage idles.
 4. RESET   stop + back to A + clear the curtain's memory (the look then
            needs a while to grow back).
-5. Ctrl+9 opens the output window (on the 2nd screen if there is one), Ctrl+0 closes it. Ctrl+8 video, Ctrl+7 still.
+5. OUTPUT card: IMAGE shape (16:9 default, 16:10, 4:3, SCREEN, 4:5 portrait),
+   RESOLUTION (AUTO = full detail, or 2160/1440/1080/720 high), SCREEN + SIZE of the
+   output window. Ctrl+9 opens it there (no border), Ctrl+0 closes it.
+   Ctrl+3 preview (again: LARGE). Ctrl+8 video (ProRes), Ctrl+7 still.
    THE FINAL IMAGE is FINAL_OUTPUT (yellow node in /project1) = Pop_glsl_sort/out_ajan.
    The window and both recorders show exactly this image.
 
@@ -28,17 +34,19 @@ ONE ROUND
   1 LISTENING       agents lean to the middle, breaths fall into sync
   2 SUPERPOSITION   short, chaotic: radius flicker, random kicks
   3 COLLAPSE        the qubits draw the winner; it inflates, the others flow into it
-  4 ANSWER          the winner fills the board (8 s)
+  4 ANSWER          the winner fills the board (AUTO: 8 s, MANUAL: holds)
   5 RETURN          everyone home, same particles, nothing reborn (5 s)
-  -> next round
+  -> AUTO: next round.  MANUAL: waits for 1 START.
+Any order is safe: every stage starts from where the image is. The draw happens at the
+end of SUPERPOSITION (AUTO) or when COLLAPSE / ANSWER is pressed (MANUAL).
 
 TIME on the panel = LISTENING + SUPERPOSITION + COLLAPSE (base 21 s, the three keep
 their proportions 15 : 2.5 : 3.5).
   mode 1  RANDOM RANGE   every round draws a length between shortest and longest
   mode 2  FIXED TIME     every round lasts exactly that
 
-AGENTS on the panel = how many are on stage (2-20). It changes at once when idle
-or listening, otherwise from the next round. Fewer agents = bigger agents (same
+AGENTS on the panel = how many are on stage (2-20). It changes at once when idle,
+listening or returning, otherwise at RETURN (change it during ANSWER). Fewer agents = bigger agents (same
 coverage). Nobody's particles are deleted: an agent leaving the stage shrinks into
 another one (slot i goes to agent i % N); when it returns its own material comes back.
 
@@ -47,18 +55,18 @@ MIDI (any controller - pads, buttons, knobs, faders)
 Plug the controller in BEFORE opening TouchDesigner. On the panel's MIDI card:
 1. DEVICE   click until your controller's name shows.
 2. LEARN    the button lights up.
-3. Click a control on the panel (START, STOP, RESET, 1 RANDOM RANGE, 2 FIXED TIME,
-   a knob, or the A <-> B bar). In learn mode a click only selects it.
+3. Click a control on the panel (a stage button, AUTO, MANUAL, STOP, RESET,
+   1 RANDOM RANGE, 2 FIXED TIME, a knob, or the A <-> B bar). In learn mode a click only selects it.
 4. Press / move the control on your device. A small gold label (e.g. "cc 21")
    appears next to the panel control.
 5. Repeat 3-4, then LEARN again to finish. FORGET removes the selected binding.
 Buttons answer to a pad (note) or a button (CC). Knobs and the bar need a knob or
 fader (CC 0-127 = the full range). The bindings are saved with the file.
 
-THE DRAW: Qiskit Aer (a simulator, not quantum hardware), just enough qubits for the
-number of agents (5 agents = 3 qubits, 10 = 4, 20 = 5). Out-of-range results are
-drawn again. Without Qiskit it falls back to Python random (the WINNERS list then
-says 'python').
+THE DRAW: a state-vector simulation in NumPy (Hadamard on every qubit, Born rule) -
+or Qiskit Aer if it is installed; a simulator, not quantum hardware. Just enough qubits
+for the number of agents (5 agents = 3 qubits, 10 = 4, 20 = 5). Out-of-range results
+are drawn again. The log says 'sv-3q' (NumPy) or 'aer-3q' (Qiskit Aer).
 
 
 THE MAP
@@ -77,7 +85,7 @@ THE MAP
      8 TOOLS         measuring scripts
      9 UNUSED / OLD  kept, nothing reads them
   FINAL_OUTPUT       THE FINAL IMAGE (coloured), what the audience sees
-  cntrl              keyboard shortcuts, output window, recorders
+  cntrl              keyboard shortcuts, image_format, output (projector window), recorders
   control_preview, guide_preview   pictures of the panel and the guide, not part of the show
 
 

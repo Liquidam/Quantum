@@ -34,10 +34,14 @@ MAP = 'midi_map'
 INPUTS = '/local/midi/midi_inputs'
 DEVICES = '/local/midi/device'
 
-BUTTONS = ('btn_start', 'btn_stop', 'btn_reset', 'mode1', 'mode2')
+BUTTONS = ('btn_start', 'btn_super', 'btn_collapse', 'btn_answer', 'btn_return',
+           'btn_stop', 'btn_reset', 'run1', 'run2', 'mode1', 'mode2')
 KNOBS = ('agents', 't_shortest', 't_longest', 't_fixed')
 BARS = ('form',)
-LABEL = {'btn_start': 'START', 'btn_stop': 'STOP', 'btn_reset': 'RESET',
+LABEL = {'btn_start': '1 START / LISTENING', 'btn_super': '2 SUPERPOSITION',
+         'btn_collapse': '3 COLLAPSE', 'btn_answer': '4 ANSWER', 'btn_return': '5 RETURN',
+         'run1': 'AUTO', 'run2': 'MANUAL',
+         'btn_stop': 'STOP', 'btn_reset': 'RESET',
          'mode1': 'TIME MODE 1', 'mode2': 'TIME MODE 2', 'agents': 'AGENTS',
          't_shortest': 'SHORTEST', 't_longest': 'LONGEST', 't_fixed': 'FIXED',
          'form': 'A <-> B'}
@@ -219,6 +223,12 @@ def _press(c):
         a.stop()
     elif c == 'btn_reset':
         a.reset()
+    elif c in a.STAGE_BUTTONS:
+        a.stage(a.STAGE_BUTTONS[c])
+    elif c == 'run1':
+        a.set_run(1)
+    elif c == 'run2':
+        a.set_run(2)
     elif c == 'mode1':
         _C().par.Timemode = 1
     elif c == 'mode2':

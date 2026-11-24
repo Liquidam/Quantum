@@ -47,6 +47,7 @@ def _midi():
 # -- read by the stage manager ---------------------------------------------------
 def settings():
     return dict(agents=int(round(_w('agents').par.Value.eval())),
+                auto=int(_C().par.Runmode.eval()) == 1,
                 mode=int(_C().par.Timemode.eval()),
                 tmin=float(_w('t_shortest').par.Value.eval()),
                 tmax=float(_w('t_longest').par.Value.eval()),
@@ -55,13 +56,31 @@ def settings():
 
 # -- buttons ---------------------------------------------------------------------
 def start():
-    """START. From A the board first becomes bodies (10 s), then round 1 begins."""
+    """1 START / LISTENING. From A the board first becomes bodies (10 s),
+    then LISTENING begins. From B: LISTENING now (a winner still on stage
+    goes home first)."""
     form = float(_w('form').par.Value.eval())
     if form < 0.99:
         _R['t0'] = time.time()
         _R['from'] = form
     else:
-        _stage().basla()
+        _stage().git('DINLEME')
+
+
+# stage buttons 2..5 (1 is START). They work in AUTO and in MANUAL.
+STAGE_BUTTONS = {'btn_super': 'SUPER', 'btn_collapse': 'COKUS',
+                 'btn_answer': 'CEVAP', 'btn_return': 'DONUS'}
+
+
+def stage(name):
+    if _R:                          # START's A->B ramp keeps going, but it will
+        _R['no_listen'] = True      # not start LISTENING at its end any more
+    _stage().git(name)
+
+
+def set_run(m):
+    """1 AUTO (rounds loop by themselves), 2 MANUAL (every stage by hand)."""
+    _C().par.Runmode = m
 
 
 def stop():
@@ -93,10 +112,9 @@ def _knob_set(k, value):
 
 def _knob_changed(k):
     if k.name == 'agents':
-        # now while idle or listening; during the draw, collapse and answer it
-        # waits for the next round (the winner must stay on stage)
-        if _stage().durum()['faz'] in ('BEKLE', 'DINLEME'):
-            _stage()._n_cek()
+        # now while idle, listening or returning; during the draw, collapse
+        # and answer it waits for RETURN (the winner must stay on stage)
+        _stage().n_degisti()
 
 
 # -- mouse ------------------------------------------------------------------------------
@@ -124,6 +142,25 @@ def mouse(event, pv, prev):
         if n in ('out_cc', 'out_ch'):       # right half +1, left half -1
             md.nudge_out(n, 1 if o.panel.u.val >= 0.5 else -1)
             return
+        # OUTPUT card: image shape + the projector window
+        if n == 'out_format':
+            op('/project1/cntrl/image_format').module.next_format()
+            return
+        if n == 'out_res':
+            op('/project1/cntrl/image_format').module.next_res()
+            return
+        if n == 'out_screen':
+            op('/project1/cntrl/output').module.next_screen()
+            return
+        if n == 'out_size':
+            op('/project1/cntrl/output').module.next_size()
+            return
+        if n == 'btn_win_open':
+            op('/project1/cntrl/output').module.open_window()
+            return
+        if n == 'btn_win_close':
+            op('/project1/cntrl/output').module.close_window()
+            return
         if md.learning():                   # LEARN: a click selects, never triggers
             target = o.parent().name if n == 'dial' else n
             if target in md.BUTTONS + md.KNOBS + md.BARS:
@@ -139,6 +176,12 @@ def mouse(event, pv, prev):
             stop()
         elif n == 'btn_reset':
             reset()
+        elif n in STAGE_BUTTONS:
+            stage(STAGE_BUTTONS[n])
+        elif n == 'run1':
+            set_run(1)
+        elif n == 'run2':
+            set_run(2)
         elif n == 'mode1':
             _C().par.Timemode = 1
         elif n == 'mode2':
@@ -186,8 +229,10 @@ def tick(frame):
         f = _R['from'] + (1.0 - _R['from']) * min(1.0, u)
         _w('form').par.Value = f
         if u >= 1.0:
+            listen = not _R.get('no_listen')
             _R.clear()
-            _stage().basla()
+            if listen:
+                _stage().git('DINLEME')
     if frame % 4 == 0:
         _show()
 
@@ -201,12 +246,20 @@ def _show():
     else:
         phase, frac = s['ad'], s['frac']
         if s['faz'] == 'BEKLE':
-            line = 'press START'
+            line = 'press  1  START'
         elif s['durduruluyor']:
             line = 'stopping  -  everyone goes home'
-        else:
-            line = 'round %d     %d agents     %.1f s     next phase in %.0f s' % (
+        elif s['sonra']:
+            line = 'going home first, then  %s' % s['sonra']
+        elif s['oto']:
+            line = 'AUTO     round %d     %d agents     %.1f s     next phase in %.0f s' % (
                 s['tur'], s['n'], s['sure'], s['kalan'])
+        elif s['tutuyor']:
+            line = 'MANUAL     round %d     %d agents     holding  -  next:  %s' % (
+                s['tur'], s['n'], s['sonraki'])
+        else:
+            line = 'MANUAL     round %d     %d agents     moving  (%.0f s)  -  next:  %s' % (
+                s['tur'], s['n'], s['kalan'], s['sonraki'])
     _w('st_phase').par.text = phase
     _w('st_progress').par.Value = frac
     _w('st_line').par.text = line
@@ -217,6 +270,30 @@ def _show():
         _w('win%d' % i).par.text = rows[i] if i < len(rows) else ''
     if parent().op('midi') is not None:
         _midi().show()
+    if parent().op('out_format') is not None and frame_ok():
+        _show_output()
+
+
+_SO = {'n': 0}
+
+
+def frame_ok():
+    # the OUTPUT card changes rarely: refresh it every 16th display update
+    _SO['n'] += 1
+    return _SO['n'] % 4 == 1
+
+
+def _show_output():
+    fm = op('/project1/cntrl/image_format').module
+    om = op('/project1/cntrl/output').module
+    (rw, rh), _, _ = fm.sizes()
+    _w('out_format').par.text = 'IMAGE   %s' % fm.name()
+    if _w('out_res') is not None:
+        _w('out_res').par.text = 'RESOLUTION   %s   %d x %d' % (
+            fm.RESOLUTIONS[fm.res_index()][0].split()[0], rw, rh)
+    _w('out_screen').par.text = om.screen_text()
+    _w('out_size').par.text = om.size_text()
+    _w('out_win_status').par.text = om.status_text()
 
 
 def _last_winner():

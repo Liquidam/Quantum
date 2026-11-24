@@ -73,6 +73,9 @@ DEFAULTS = dict(
     fade=0.02,         # per frame, how fast a slot leaves / returns (~3 s)
     br_amp=0.14,       # breathing depth (radius +-), each agent its own rhythm (0.05 until 2026-11-11)
     br_rate=0.035,     # breathing speed (radians per frame x the agent's own pace)
+    lobe=1.5,          # 2026-11-24 Eduardo: an agent's living edge (amoeba lobes,
+                       # breathing) reaches past r. Walls keep r * lobe + pad
+    pad=2.5,           # inside the box, so nobody is cut by the frame.
 )
 
 N_MIN = 2
@@ -154,6 +157,10 @@ class AgentCentres:
         r *= 1.0 + p['br_amp'] * br + 0.04 * p['tension']
         if p['chaos'] > 0:
             r *= 1.0 + p['chaos'] * 0.35 * self.rng.uniform(-1, 1, self.n)
+        # 2026-11-24: never bigger than the board's short side allows (few agents
+        # on a 16:9 board were taller than the picture and got cut)
+        cap = (min(self.hb) * p['dish'] - p['pad']) / p['lobe']
+        r = np.minimum(r, max(cap, 1.0))
         w = int(p['winner'])
         c = _smooth(p['collapse'])
         if 0 <= w < self.n and c > 0:
@@ -194,8 +201,9 @@ class AgentCentres:
         F += (u * (self.K * band * k_aff * pair)[..., None]).sum(1)
 
         # the dish: an ellipse inside the box. e > 1 means outside.
-        ax = self.hb[0] * p['dish'] - r
-        ay = self.hb[1] * p['dish'] - r
+        reach_out = r * p['lobe'] + p['pad']
+        ax = np.maximum(self.hb[0] * p['dish'] - reach_out, 1.0)
+        ay = np.maximum(self.hb[1] * p['dish'] - reach_out, 1.0)
         e = np.sqrt((self.x[:, 0] / ax) ** 2 + (self.x[:, 1] / ay) ** 2) + 1e-9
 
         # wander: heading turns slowly, every agent at its own pace.
@@ -236,7 +244,7 @@ class AgentCentres:
         out = np.clip(e - 1.0, 0, None)
         F -= (self.x / e[:, None]) * out[:, None] * p['k_wall'] * f
         # and the hard box, always
-        lim = self.hb[None, :] - r[:, None]
+        lim = np.maximum(self.hb[None, :] - reach_out[:, None], 0.5)
         over = np.clip(np.abs(self.x) - lim, 0, None) * np.sign(self.x)
         F -= over * p['k_wall']
 
@@ -245,6 +253,12 @@ class AgentCentres:
         sp = np.sqrt((self.v ** 2).sum(1, keepdims=True)) + 1e-9
         self.v *= np.minimum(1.0, vmax / sp)
         self.x += self.v
+
+        # 2026-11-24: the soft wall alone let crowded bodies (8 agents in a
+        # 16:9 board) be pushed past it and cut by the frame -> hard limit
+        hit = np.abs(self.x) > lim
+        self.x = np.clip(self.x, -lim, lim)
+        self.v[hit] *= -0.3
 
         # off stage: the slot rides into its alias (its particles go there too)
         al = self.alias()
